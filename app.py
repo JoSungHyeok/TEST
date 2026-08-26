@@ -16,7 +16,7 @@ if "articles_list" not in st.session_state:
 
 with st.sidebar:
     st.header("⚙️ 설정")
-    keyword = st.text_input("수집할 키워드/종목명", "주식")
+    keyword = st.text_input("수집할 키워드", "")
     auto_refresh = st.checkbox("자동 새로고침 (30초 마다)", value=False)
     
     if st.button("목록 초기화 및 재수집"):
@@ -85,7 +85,7 @@ def render_news_section():
     st.subheader(f"'{keyword}' 관련 최신 뉴스 (총 {len(st.session_state.articles_list)}개 수집됨)")
 
     if not st.session_state.articles_list:
-        st.warning("수집된 뉴스가 없습니다. '목록 초기화 및 재수집' 버튼을 눌러주세요.")
+        st.warning("수집된 뉴스가 없습니다. 수집할 키워드를 입력해 주세요.")
     else:
         for idx, item in enumerate(st.session_state.articles_list[:20], 1):
             col1, col2 = st.columns([5, 1.5])
