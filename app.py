@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import requests
 import xml.etree.ElementTree as ET
 import urllib.parse
@@ -143,54 +142,49 @@ def fetch_main_headlines():
         
     return headlines
 
-# --- [화면 출력부] ---
-tab1, tab2 = st.tabs(["🔍 키워드 검색 뉴스", "📰 구글 메인 헤드라인"])
-
-# 탭 1: 키워드 검색 뉴스
-with tab1:
-    new_fetched = fetch_search_news(keyword)
-    if new_fetched:
-        all_articles = new_fetched + st.session_state.articles_list
-        all_articles.sort(key=lambda x: x["dt"], reverse=True)
-        st.session_state.articles_list = all_articles
-
-    st.subheader(f"'{keyword}' 검색 결과 (총 {len(st.session_state.articles_list)}개)")
-
-    if not st.session_state.articles_list:
-        st.info("수집된 키워드 뉴스가 없습니다. 상단 검색창에 키워드를 입력해 주세요.")
-    else:
-        for idx, item in enumerate(st.session_state.articles_list[:20], 1):
-            col1, col2 = st.columns([4.5, 2])
-            with col1:
-                st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
-            with col2:
-                st.caption(f"작성일: {item['pub_date']}")
-
-# 탭 2: 메인 헤드라인 뉴스
-with tab2:
-    st.subheader("🔥 실시간 주요 헤드라인 뉴스")
-    main_news = fetch_main_headlines()
+# --- [공식 st.fragment 기반 자동 새로고침 영역] ---
+# run_every 속성을 통해 30초마다 아래 영역만 감쪽같이 자동 갱신됩니다.
+@st.fragment(run_every=30 if auto_refresh else None)
+def render_news_section():
+    if auto_refresh:
+        st.caption("🔄 **30초 자동 새로고침 활성화됨** (30초마다 뉴스 목록이 자동 갱신됩니다)")
     
-    if not main_news:
-        st.warning("메인 뉴스를 불러올 수 없습니다.")
-    else:
-        for idx, item in enumerate(main_news[:15], 1):
-            col1, col2 = st.columns([4.5, 2])
-            with col1:
-                st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
-            with col2:
-                st.caption(f"작성일: {item['pub_date']}")
+    tab1, tab2 = st.tabs(["🔍 키워드 검색 뉴스", "📰 구글 메인 헤드라인"])
 
-# --- [자바스크립트 기반 30초 논블로킹 새로고침] ---
-if auto_refresh:
-    st.caption("⏱️ 30초 주기 자동 새로고침이 활성화되어 있습니다.")
-    components.html(
-        """
-        <script>
-            setTimeout(function(){
-                window.parent.postMessage({type: 'streamlit:rerun'}, '*');
-            }, 30000);
-        </script>
-        """,
-        height=0
-    )
+    # 탭 1: 키워드 검색 뉴스
+    with tab1:
+        new_fetched = fetch_search_news(keyword)
+        if new_fetched:
+            all_articles = new_fetched + st.session_state.articles_list
+            all_articles.sort(key=lambda x: x["dt"], reverse=True)
+            st.session_state.articles_list = all_articles
+
+        st.subheader(f"'{keyword}' 검색 결과 (총 {len(st.session_state.articles_list)}개)")
+
+        if not st.session_state.articles_list:
+            st.info("수집된 키워드 뉴스가 없습니다. 상단 검색창에 키워드를 입력해 주세요.")
+        else:
+            for idx, item in enumerate(st.session_state.articles_list[:20], 1):
+                col1, col2 = st.columns([4.5, 2])
+                with col1:
+                    st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
+                with col2:
+                    st.caption(f"작성일: {item['pub_date']}")
+
+    # 탭 2: 메인 헤드라인 뉴스
+    with tab2:
+        st.subheader("🔥 실시간 주요 헤드라인 뉴스")
+        main_news = fetch_main_headlines()
+        
+        if not main_news:
+            st.warning("메인 뉴스를 불러올 수 없습니다.")
+        else:
+            for idx, item in enumerate(main_news[:15], 1):
+                col1, col2 = st.columns([4.5, 2])
+                with col1:
+                    st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
+                with col2:
+                    st.caption(f"작성일: {item['pub_date']}")
+
+# 뉴스 출력 함수 실행
+render_news_section()
