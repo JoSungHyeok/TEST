@@ -5,9 +5,9 @@ import urllib.parse
 from datetime import timezone, timedelta
 from email.utils import parsedate_to_datetime
 
-st.set_page_config(page_title="주식 뉴스 자동 스크랩", layout="wide")
+st.set_page_config(page_title="뉴스 자동 스크랩", layout="wide")
 
-st.title("📈 주식 뉴스 실시간 자동 수집기")
+st.title("📈 뉴스 실시간 자동 수집기")
 
 if "saved_links" not in st.session_state:
     st.session_state.saved_links = set()
