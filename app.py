@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import xml.etree.ElementTree as ET
 import urllib.parse
@@ -6,11 +7,11 @@ from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
 st.set_page_config(
-    page_title="주식 뉴스 자동 스크랩", 
+    page_title="뉴스 자동 스크랩", 
     layout="wide"
 )
 
-# 사이드바 화살표 아이콘을 '🔍 검색' 버튼으로 교체
+# 사이드바 화살표 아이콘을 '🔍 검색' 버튼으로 교체하는 CSS
 st.markdown("""
     <style>
         [data-testid="collapsedControl"] svg {
@@ -39,8 +40,10 @@ if "saved_links" not in st.session_state:
     st.session_state.saved_links = set()
 if "articles_list" not in st.session_state:
     st.session_state.articles_list = []
+if "last_keyword" not in st.session_state:
+    st.session_state.last_keyword = ""
 
-# 상단 컨트롤 영역
+# --- [상단 컨트롤 영역] ---
 col_input, col_check, col_btn = st.columns([3.5, 1.2, 1])
 
 with col_input:
@@ -53,9 +56,15 @@ with col_btn:
         st.session_state.saved_links = set()
         st.rerun()
 
+# 키워드가 바뀌었으면 기존 수집 목록 자동 초기화
+if keyword != st.session_state.last_keyword:
+    st.session_state.articles_list = []
+    st.session_state.saved_links = set()
+    st.session_state.last_keyword = keyword
+
 st.divider()
 
-# 연도-월-일 시:분까지 명확히 파싱하는 함수
+# 날짜 파싱 및 한국 표준시(KST) 변환 함수
 def parse_pub_date(pub_date_str):
     if not pub_date_str:
         return datetime.min.replace(tzinfo=timezone.utc), "-"
@@ -63,9 +72,7 @@ def parse_pub_date(pub_date_str):
         dt = parsedate_to_datetime(pub_date_str)
         kst = timezone(timedelta(hours=9))
         dt_kst = dt.astimezone(kst)
-        # YYYY-MM-DD HH:MM 서식 지정 (예: 2026-08-26 16:50)
-        formatted_str = dt_kst.strftime("%Y-%m-%d %H:%M")
-        return dt_kst, formatted_str
+        return dt_kst, dt_kst.strftime("%Y-%m-%d %H:%M")
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc), pub_date_str
 
@@ -106,7 +113,6 @@ def fetch_search_news(search_keyword):
     return new_articles
 
 # 2. 메인 헤드라인 뉴스 수집
-@st.cache_data(ttl=300)
 def fetch_main_headlines():
     url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -137,32 +143,30 @@ def fetch_main_headlines():
         
     return headlines
 
-# 화면 출력부
+# --- [화면 출력부] ---
 tab1, tab2 = st.tabs(["🔍 키워드 검색 뉴스", "📰 구글 메인 헤드라인"])
 
+# 탭 1: 키워드 검색 뉴스
 with tab1:
-    @st.fragment(run_every=30 if auto_refresh else None)
-    def render_search_section():
-        new_fetched = fetch_search_news(keyword)
-        if new_fetched:
-            all_articles = new_fetched + st.session_state.articles_list
-            all_articles.sort(key=lambda x: x["dt"], reverse=True)
-            st.session_state.articles_list = all_articles
+    new_fetched = fetch_search_news(keyword)
+    if new_fetched:
+        all_articles = new_fetched + st.session_state.articles_list
+        all_articles.sort(key=lambda x: x["dt"], reverse=True)
+        st.session_state.articles_list = all_articles
 
-        st.subheader(f"'{keyword}' 검색 결과 (총 {len(st.session_state.articles_list)}개)")
+    st.subheader(f"'{keyword}' 검색 결과 (총 {len(st.session_state.articles_list)}개)")
 
-        if not st.session_state.articles_list:
-            st.info("수집된 키워드 뉴스가 없습니다. 상단 검색창에 키워드를 입력해 주세요.")
-        else:
-            for idx, item in enumerate(st.session_state.articles_list[:20], 1):
-                col1, col2 = st.columns([4.5, 2])
-                with col1:
-                    st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
-                with col2:
-                    st.caption(f"작성일: {item['pub_date']}")
+    if not st.session_state.articles_list:
+        st.info("수집된 키워드 뉴스가 없습니다. 상단 검색창에 키워드를 입력해 주세요.")
+    else:
+        for idx, item in enumerate(st.session_state.articles_list[:20], 1):
+            col1, col2 = st.columns([4.5, 2])
+            with col1:
+                st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
+            with col2:
+                st.caption(f"작성일: {item['pub_date']}")
 
-    render_search_section()
-
+# 탭 2: 메인 헤드라인 뉴스
 with tab2:
     st.subheader("🔥 실시간 주요 헤드라인 뉴스")
     main_news = fetch_main_headlines()
@@ -176,3 +180,17 @@ with tab2:
                 st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
             with col2:
                 st.caption(f"작성일: {item['pub_date']}")
+
+# --- [자바스크립트 기반 30초 논블로킹 새로고침] ---
+if auto_refresh:
+    st.caption("⏱️ 30초 주기 자동 새로고침이 활성화되어 있습니다.")
+    components.html(
+        """
+        <script>
+            setTimeout(function(){
+                window.parent.postMessage({type: 'streamlit:rerun'}, '*');
+            }, 30000);
+        </script>
+        """,
+        height=0
+    )
