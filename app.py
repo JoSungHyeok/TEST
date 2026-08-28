@@ -9,7 +9,7 @@ import streamlit as st
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="뉴스 자동 스크랩", layout="wide")
 
-st.title("📈 뉴스 실시간 자동 수집기")
+st.title("📈 뉴스 수집기")
 
 # 2. 세션 상태 초기화
 if "saved_titles" not in st.session_state:
@@ -215,8 +215,8 @@ st.divider()
 tab1, tab2, tab3 = st.tabs(
     [
         "📰 구글 메인 헤드라인",
-        "🔍 키워드 검색 뉴스",
-        "🔥 실시간 인기 트렌드 뉴스",
+        "🔍 키워드 검색",
+        "🔥 실시간 인기",
     ]
 )
 
@@ -262,7 +262,7 @@ with tab2:
 
 with tab3:
     st.subheader(
-        f"🔥 누적 수집된 실시간 인기 트렌드 뉴스 (총 {len(st.session_state.trending_articles)}개)"
+        f"🔥 실시간 인기 트렌드 뉴스 (총 {len(st.session_state.trending_articles)}개)"
     )
 
     if not st.session_state.trending_articles:
