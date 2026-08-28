@@ -1,70 +1,34 @@
-import streamlit as st
-import requests
-import xml.etree.ElementTree as ET
 import urllib.parse
-from datetime import datetime, timezone, timedelta
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-st.set_page_config(
-    page_title="뉴스 자동 스크랩", 
-    layout="wide"
-)
+import requests
+import streamlit as st
 
-# 사이드바 화살표 아이콘을 '🔍 검색' 버튼으로 교체하는 CSS
-st.markdown("""
-    <style>
-        [data-testid="collapsedControl"] svg {
-            display: none !important;
-        }
-        [data-testid="collapsedControl"] button::after {
-            content: "🔍 검색";
-            font-size: 14px;
-            font-weight: bold;
-            color: #333;
-        }
-        [data-testid="collapsedControl"] button {
-            width: auto !important;
-            padding: 4px 12px !important;
-            border: 1px solid #ccc !important;
-            border-radius: 6px !important;
-            background-color: #f8f9fa !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
+# 1. 페이지 기본 설정
+st.set_page_config(page_title="뉴스 자동 스크랩", layout="wide")
 
 st.title("📈 뉴스 실시간 자동 수집기")
 
-# 세션 상태 초기화
-if "saved_links" not in st.session_state:
-    st.session_state.saved_links = set()
+# 2. 세션 상태 초기화
+if "saved_titles" not in st.session_state:
+    st.session_state.saved_titles = set()
 if "articles_list" not in st.session_state:
     st.session_state.articles_list = []
 if "last_keyword" not in st.session_state:
     st.session_state.last_keyword = ""
 
-# --- [상단 컨트롤 영역] ---
-col_input, col_check, col_btn = st.columns([3.5, 1.2, 1])
+# 실시간 인기글 전용 세션 상태
+if "trending_saved_titles" not in st.session_state:
+    st.session_state.trending_saved_titles = set()
+if "trending_articles" not in st.session_state:
+    st.session_state.trending_articles = []
 
-with col_input:
-    keyword = st.text_input("검색어", " ", placeholder="키워드를 입력 후 Enter를 누르세요", label_visibility="collapsed")
-with col_check:
-    auto_refresh = st.checkbox("30초 자동 새로고침", value=False)
-with col_btn:
-    if st.button("목록 초기화", use_container_width=True):
-        st.session_state.articles_list = []
-        st.session_state.saved_links = set()
-        st.rerun()
 
-# 키워드가 바뀌었으면 기존 수집 목록 자동 초기화
-if keyword != st.session_state.last_keyword:
-    st.session_state.articles_list = []
-    st.session_state.saved_links = set()
-    st.session_state.last_keyword = keyword
-
-st.divider()
-
-# 날짜 파싱 및 한국 표준시(KST) 변환 함수
+# 3. 유틸리티 함수
 def parse_pub_date(pub_date_str):
+    """날짜 문자열 파싱 및 한국 표준시(KST) 변환"""
     if not pub_date_str:
         return datetime.min.replace(tzinfo=timezone.utc), "-"
     try:
@@ -75,15 +39,18 @@ def parse_pub_date(pub_date_str):
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc), pub_date_str
 
-# 1. 키워드 검색 뉴스 수집
+
 def fetch_search_news(search_keyword):
-    if not search_keyword.strip():
+    """키워드 검색 뉴스 수집 (중복 제외 및 누적)"""
+    if not search_keyword.strip() or search_keyword == "검색어를 입력하고 Enter를 누르세요":
         return []
-    
+
     encoded_keyword = urllib.parse.quote(search_keyword)
     url = f"https://news.google.com/rss/search?q={encoded_keyword}&hl=ko&gl=KR&ceid=KR:ko"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
     new_articles = []
     try:
         response = requests.get(url, headers=headers, timeout=5)
@@ -93,29 +60,87 @@ def fetch_search_news(search_keyword):
                 title = item.findtext("title", "")
                 link = item.findtext("link", "")
                 pub_date_raw = item.findtext("pubDate", "")
-                
+
                 if " - " in title:
                     title = title.rsplit(" - ", 1)[0]
-                
-                if title and link and link not in st.session_state.saved_links:
-                    st.session_state.saved_links.add(link)
+
+                clean_title = title.strip()
+                if clean_title and link and clean_title not in st.session_state.saved_titles:
+                    st.session_state.saved_titles.add(clean_title)
                     dt_obj, formatted_date = parse_pub_date(pub_date_raw)
-                    new_articles.append({
-                        "title": title, 
-                        "link": link, 
-                        "dt": dt_obj,
-                        "pub_date": formatted_date
-                    })
+                    new_articles.append(
+                        {
+                            "title": clean_title,
+                            "link": link,
+                            "dt": dt_obj,
+                            "pub_date": formatted_date,
+                        }
+                    )
     except Exception as e:
         st.error(f"검색 뉴스 수집 중 오류: {e}")
-        
+
     return new_articles
 
-# 2. 메인 헤드라인 뉴스 수집
-def fetch_main_headlines():
-    url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    headlines = []
+
+def fetch_trending_news():
+    """구글 트렌드 실시간 인기 검색어 RSS 수집 (중복 제외 및 누적)"""
+    url = "https://trends.google.co.kr/trending/rss?geo=KR"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    new_articles = []
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            root = ET.fromstring(response.content)
+            # ht:news_item 네임스페이스 및 일반 item 처리
+            for item in root.findall(".//item"):
+                # 구글 트렌드 RSS는 item 내부에 뉴스 관련 상세 태그가 포함될 수 있음
+                trend_title = item.findtext("title", "")
+                pub_date_raw = item.findtext("pubDate", "")
+                
+                # 구글 트렌드 특유의 ht:news_item 검색
+                news_items = item.findall("{https://trends.google.com/trending/rss}news_item")
+                if news_items:
+                    for news in news_items:
+                        title = news.findtext("{https://trends.google.com/trending/rss}news_item_title", "")
+                        link = news.findtext("{https://trends.google.com/trending/rss}news_item_url", "")
+                        clean_title = title.strip() if title else trend_title.strip()
+                        
+                        if clean_title and clean_title not in st.session_state.trending_saved_titles:
+                            st.session_state.trending_saved_titles.add(clean_title)
+                            dt_obj, formatted_date = parse_pub_date(pub_date_raw)
+                            new_articles.append({
+                                "title": f"[{trend_title}] {clean_title}",
+                                "link": link if link else "https://trends.google.co.kr",
+                                "dt": dt_obj,
+                                "pub_date": formatted_date
+                            })
+                else:
+                    link = item.findtext("link", "")
+                    clean_title = trend_title.strip()
+                    if clean_title and clean_title not in st.session_state.trending_saved_titles:
+                        st.session_state.trending_saved_titles.add(clean_title)
+                        dt_obj, formatted_date = parse_pub_date(pub_date_raw)
+                        new_articles.append({
+                            "title": clean_title,
+                            "link": link,
+                            "dt": dt_obj,
+                            "pub_date": formatted_date
+                        })
+    except Exception as e:
+        st.error(f"실시간 인기글 수집 중 오류: {e}")
+
+    return new_articles
+
+
+def fetch_rss_news(url):
+    """일반 RSS 헤드라인 단발 조회"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    articles = []
     try:
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
@@ -124,67 +149,133 @@ def fetch_main_headlines():
                 title = item.findtext("title", "")
                 link = item.findtext("link", "")
                 pub_date_raw = item.findtext("pubDate", "")
-                
+
                 if " - " in title:
                     title = title.rsplit(" - ", 1)[0]
-                
+
                 if title and link:
                     dt_obj, formatted_date = parse_pub_date(pub_date_raw)
-                    headlines.append({
-                        "title": title, 
-                        "link": link, 
-                        "dt": dt_obj,
-                        "pub_date": formatted_date
-                    })
-            headlines.sort(key=lambda x: x["dt"], reverse=True)
+                    articles.append(
+                        {
+                            "title": title.strip(),
+                            "link": link,
+                            "dt": dt_obj,
+                            "pub_date": formatted_date,
+                        }
+                    )
+            articles.sort(key=lambda x: x["dt"], reverse=True)
     except Exception as e:
-        st.error(f"메인 뉴스 수집 중 오류: {e}")
-        
-    return headlines
+        st.error(f"뉴스 수집 중 오류: {e}")
 
-# --- [공식 st.fragment 기반 자동 새로고침 영역] ---
-# run_every 속성을 통해 30초마다 아래 영역만 감쪽같이 자동 갱신됩니다.
-@st.fragment(run_every=30 if auto_refresh else None)
-def render_news_section():
-    if auto_refresh:
-        st.caption("🔄 **30초 자동 새로고침 활성화됨** (30초마다 뉴스 목록이 자동 갱신됩니다)")
-    
-    tab1, tab2 = st.tabs(["🔍 키워드 검색 뉴스", "📰 구글 메인 헤드라인"])
+    return articles
 
-    # 탭 1: 키워드 검색 뉴스
-    with tab1:
+
+# 4. 상단 컨트롤 레이아웃
+col_input, col_refresh, col_reset = st.columns([3.8, 1.1, 1.1])
+
+with col_input:
+    keyword = st.text_input(
+        "검색어",
+        value="",
+        placeholder="검색어를 입력하고 Enter를 누르세요",
+        label_visibility="collapsed",
+    )
+
+with col_refresh:
+    refresh_clicked = st.button("🔄 즉시 새로고침", use_container_width=True)
+
+with col_reset:
+    if st.button("🗑️ 검색목록 초기화", use_container_width=True):
+        st.session_state.articles_list = []
+        st.session_state.saved_titles = set()
+        st.session_state.last_keyword = ""
+        st.rerun()
+
+# 검색어 변경 제어
+if keyword != st.session_state.last_keyword:
+    st.session_state.articles_list = []
+    st.session_state.saved_titles = set()
+    st.session_state.last_keyword = keyword
+
+# 5. 백그라운드 인기글 스크랩 실행
+new_trending = fetch_trending_news()
+if new_trending:
+    all_trending = new_trending + st.session_state.trending_articles
+    all_trending.sort(key=lambda x: x["dt"], reverse=True)
+    st.session_state.trending_articles = all_trending
+
+if refresh_clicked:
+    st.rerun()
+
+st.divider()
+
+# 6. 메인 화면 탭 구성
+tab1, tab2, tab3 = st.tabs(
+    [
+        "📰 구글 메인 헤드라인",
+        "🔍 키워드 검색 뉴스",
+        "🔥 실시간 인기 트렌드 뉴스 (자동 스크랩)",
+    ]
+)
+
+with tab1:
+    st.subheader("📰 구글 주요 메인 헤드라인")
+    main_news = fetch_rss_news(
+        "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
+    )
+
+    if not main_news:
+        st.warning("메인 뉴스를 불러올 수 없습니다.")
+    else:
+        for idx, item in enumerate(main_news[:15], 1):
+            col1, col2 = st.columns([4.5, 2])
+            with col1:
+                st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
+            with col2:
+                st.caption(f"작성일: {item['pub_date']}")
+
+with tab2:
+    if keyword.strip():
         new_fetched = fetch_search_news(keyword)
         if new_fetched:
             all_articles = new_fetched + st.session_state.articles_list
             all_articles.sort(key=lambda x: x["dt"], reverse=True)
             st.session_state.articles_list = all_articles
 
-        st.subheader(f"'{keyword}' 검색 결과 (총 {len(st.session_state.articles_list)}개)")
+    st.subheader(
+        f"'{keyword}' 검색 결과 (총 {len(st.session_state.articles_list)}개 스크랩됨)"
+    )
 
-        if not st.session_state.articles_list:
-            st.info("수집된 키워드 뉴스가 없습니다. 상단 검색창에 키워드를 입력해 주세요.")
-        else:
-            for idx, item in enumerate(st.session_state.articles_list[:20], 1):
-                col1, col2 = st.columns([4.5, 2])
-                with col1:
-                    st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
-                with col2:
-                    st.caption(f"작성일: {item['pub_date']}")
+    if not st.session_state.articles_list:
+        st.info(
+            "수집된 키워드 뉴스가 없습니다. 상단 검색창에 키워드를 입력해 주세요."
+        )
+    else:
+        for idx, item in enumerate(st.session_state.articles_list[:30], 1):
+            col1, col2 = st.columns([4.5, 2])
+            with col1:
+                st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
+            with col2:
+                st.caption(f"작성일: {item['pub_date']}")
 
-    # 탭 2: 메인 헤드라인 뉴스
-    with tab2:
-        st.subheader("🔥 실시간 주요 헤드라인 뉴스")
-        main_news = fetch_main_headlines()
-        
-        if not main_news:
-            st.warning("메인 뉴스를 불러올 수 없습니다.")
-        else:
-            for idx, item in enumerate(main_news[:15], 1):
-                col1, col2 = st.columns([4.5, 2])
-                with col1:
-                    st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
-                with col2:
-                    st.caption(f"작성일: {item['pub_date']}")
+with tab3:
+    col_title, col_clean = st.columns([4, 1.2])
+    with col_title:
+        st.subheader(
+            f"🔥 누적 수집된 실시간 인기 트렌드 뉴스 (총 {len(st.session_state.trending_articles)}개)"
+        )
+    with col_clean:
+        if st.button("🗑️ 인기글 스크랩 비우기", use_container_width=True):
+            st.session_state.trending_articles = []
+            st.session_state.trending_saved_titles = set()
+            st.rerun()
 
-# 뉴스 출력 함수 실행
-render_news_section()
+    if not st.session_state.trending_articles:
+        st.info("수집된 실시간 인기 뉴스가 없습니다.")
+    else:
+        for idx, item in enumerate(st.session_state.trending_articles[:50], 1):
+            col1, col2 = st.columns([4.5, 2])
+            with col1:
+                st.markdown(f"**{idx}. [{item['title']}]({item['link']})**")
+            with col2:
+                st.caption(f"작성일: {item['pub_date']}")
