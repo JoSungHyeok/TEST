@@ -94,13 +94,10 @@ def fetch_trending_news():
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             root = ET.fromstring(response.content)
-            # ht:news_item 네임스페이스 및 일반 item 처리
             for item in root.findall(".//item"):
-                # 구글 트렌드 RSS는 item 내부에 뉴스 관련 상세 태그가 포함될 수 있음
                 trend_title = item.findtext("title", "")
                 pub_date_raw = item.findtext("pubDate", "")
                 
-                # 구글 트렌드 특유의 ht:news_item 검색
                 news_items = item.findall("{https://trends.google.com/trending/rss}news_item")
                 if news_items:
                     for news in news_items:
@@ -182,7 +179,7 @@ with col_input:
     )
 
 with col_refresh:
-    refresh_clicked = st.button("🔄 즉시 새로고침", use_container_width=True)
+    refresh_clicked = st.button("🔄 새로고침", use_container_width=True)
 
 with col_reset:
     if st.button("🗑️ 검색목록 초기화", use_container_width=True):
@@ -190,6 +187,14 @@ with col_reset:
         st.session_state.saved_titles = set()
         st.session_state.last_keyword = ""
         st.rerun()
+
+# 상단 '🔄 새로고침' 클릭 시 모든 수집 리스트를 초기화하여 최신 데이터로 다시 스크랩
+if refresh_clicked:
+    st.session_state.articles_list = []
+    st.session_state.saved_titles = set()
+    st.session_state.trending_articles = []
+    st.session_state.trending_saved_titles = set()
+    st.rerun()
 
 # 검색어 변경 제어
 if keyword != st.session_state.last_keyword:
@@ -204,9 +209,6 @@ if new_trending:
     all_trending.sort(key=lambda x: x["dt"], reverse=True)
     st.session_state.trending_articles = all_trending
 
-if refresh_clicked:
-    st.rerun()
-
 st.divider()
 
 # 6. 메인 화면 탭 구성
@@ -214,7 +216,7 @@ tab1, tab2, tab3 = st.tabs(
     [
         "📰 구글 메인 헤드라인",
         "🔍 키워드 검색 뉴스",
-        "🔥 실시간 인기 트렌드 뉴스 (자동 스크랩)",
+        "🔥 실시간 인기 트렌드 뉴스",
     ]
 )
 
@@ -259,16 +261,9 @@ with tab2:
                 st.caption(f"작성일: {item['pub_date']}")
 
 with tab3:
-    col_title, col_clean = st.columns([4, 1.2])
-    with col_title:
-        st.subheader(
-            f"🔥 누적 수집된 실시간 인기 트렌드 뉴스 (총 {len(st.session_state.trending_articles)}개)"
-        )
-    with col_clean:
-        if st.button("🗑️ 인기글 스크랩 비우기", use_container_width=True):
-            st.session_state.trending_articles = []
-            st.session_state.trending_saved_titles = set()
-            st.rerun()
+    st.subheader(
+        f"🔥 누적 수집된 실시간 인기 트렌드 뉴스 (총 {len(st.session_state.trending_articles)}개)"
+    )
 
     if not st.session_state.trending_articles:
         st.info("수집된 실시간 인기 뉴스가 없습니다.")
